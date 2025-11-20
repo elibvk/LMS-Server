@@ -154,14 +154,15 @@ async function isRegisteredUser(email) {
       return { exists: true, isAdmin: true, user: admin };
     }
 
-    // TODO: Add check for regular users when user model is implemented
-    // const user = await User.findOne({ email });
-    // if (user) {
-    //   return { exists: true, isAdmin: false, user };
-    // }
+    // Check if regular user
+    const User = require('../models/User');
+    const user = await User.findOne({ email });
+    if (user) {
+      return { exists: true, isAdmin: false, user };
+    }
 
-    // For now, allow any email (they'll get invitation email)
-    return { exists: true, isAdmin: false, user: null };
+    // Email not registered
+    return { exists: false, isAdmin: false, user: null };
   } catch (error) {
     console.error('Error checking user:', error);
     return { exists: false, isAdmin: false, user: null };

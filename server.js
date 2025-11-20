@@ -1,22 +1,28 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const path = require('path');
 const invitesRoutes = require('./routes/invites');
-require('dotenv').config();
+const userAuthRoutes = require('./routes/userAuth');
 
 const app = express();
 
 // Middleware
 app.use(cors({ 
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  credentials: true 
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'] 
 }));
 app.use(express.json());
 
 // Serve uploaded docs as static files
 const docsPath = path.join(__dirname, '../client/public/docs');
 app.use('/docs', express.static(docsPath));
+
+const uploadsPath = path.join(__dirname, '../uploads');
+app.use('/uploads', express.static(uploadsPath));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI)
@@ -50,6 +56,7 @@ app.use('/api/auth', require('./routes/auth.js'));
 app.use('/api/courses', require('./routes/courses.js'));
 app.use('/api/admins', require('./routes/admins.js'));
 app.use('/api/invites', invitesRoutes);
+app.use('/api/user-auth', userAuthRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -64,4 +71,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`📁 Serving docs from: ${docsPath}`);
+  console.log(`📁 Serving uploads from: ${uploadsPath}`);
 });
