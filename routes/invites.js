@@ -1,12 +1,13 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs').promises;
+const Course = require('../models/Course');
 
 const router = express.Router();
 
 // Helper: Load invites
 async function loadInvites() {
-  const invitesPath = path.join(__dirname, '../../data/collaboration_invites.json');
+  const invitesPath = path.join(__dirname, '../data/collaboration_invites.json');
   try {
     const content = await fs.readFile(invitesPath, 'utf-8');
     return JSON.parse(content);
@@ -17,8 +18,8 @@ async function loadInvites() {
 
 // Helper: Save invites
 async function saveInvites(invites) {
-  const invitesPath = path.join(__dirname, '../../data/collaboration_invites.json');
-  const dataDir = path.join(__dirname, '../../data');
+  const invitesPath = path.join(__dirname, '../data/collaboration_invites.json');
+  const dataDir = path.join(__dirname, '../data');
   
   try {
     await fs.access(dataDir);
@@ -29,8 +30,35 @@ async function saveInvites(invites) {
   await fs.writeFile(invitesPath, JSON.stringify(invites, null, 2));
 }
 
+// Helper: Update index.json for backward compatibility
+async function updateIndexJson() {
+  try {
+    const docsDir = path.join(__dirname, '../../client/public/docs');
+    const indexPath = path.join(docsDir, 'index.json');
+    
+    const courses = await Course.find({}).sort({ projectId: 1 });
+    
+    const indexData = courses.map(course => ({
+      proj: course.projectId,
+      title: course.title,
+      description: course.description,
+      keywords: course.keywords,
+      createdBy: course.createdBy,
+      createdAt: course.createdAt,
+      lastModifiedBy: course.lastModifiedBy,
+      lastModifiedAt: course.lastModifiedAt,
+      collaborators: course.collaborators
+    }));
+    
+    await fs.writeFile(indexPath, JSON.stringify(indexData, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error updating index.json:', error);
+    return false;
+  }
+}
+
 // GET /api/invites/:token
-// Get invitation details
 router.get('/:token', async (req, res) => {
   try {
     const { token } = req.params;
@@ -62,11 +90,10 @@ router.get('/:token', async (req, res) => {
 });
 
 // POST /api/invites/:token/accept
-// Accept invitation
 router.post('/:token/accept', async (req, res) => {
   try {
     const { token } = req.params;
-    const { email } = req.body; // User's email for verification
+    const { email } = req.body;
     
     const invites = await loadInvites();
     const inviteIndex = invites.findIndex(inv => inv.token === token && inv.status === 'pending');
@@ -82,25 +109,19 @@ router.post('/:token/accept', async (req, res) => {
       return res.status(400).json({ error: 'This invitation has expired' });
     }
     
-    // Verify email matches (case insensitive)
+    // Verify email matches
     if (email && email.toLowerCase() !== invite.invitedEmail.toLowerCase()) {
       return res.status(403).json({ error: 'This invitation is for a different email address' });
     }
     
-    // Update course collaborator status to 'accepted'
-    const docsDir = path.join(__dirname, '../../client/public/docs');
-    const indexPath = path.join(docsDir, 'index.json');
+    // Update course collaborator status to 'accepted' in MongoDB
+    const course = await Course.findOne({ projectId: invite.courseId });
     
-    const content = await fs.readFile(indexPath, 'utf-8');
-    const courses = JSON.parse(content);
-    const courseIndex = courses.findIndex(c => c.proj === invite.courseId);
-    
-    if (courseIndex === -1) {
+    if (!course) {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    const course = courses[courseIndex];
-    const collabIndex = course.collaborators?.findIndex(
+    const collabIndex = course.collaborators.findIndex(
       c => c.email === invite.invitedEmail && c.inviteToken === token
     );
     
@@ -110,11 +131,13 @@ router.post('/:token/accept', async (req, res) => {
     
     // Update status to accepted
     course.collaborators[collabIndex].status = 'accepted';
-    course.collaborators[collabIndex].acceptedAt = new Date().toISOString();
-    delete course.collaborators[collabIndex].inviteToken; // Remove token for security
+    course.collaborators[collabIndex].acceptedAt = new Date();
+    delete course.collaborators[collabIndex].inviteToken;
     
-    courses[courseIndex] = course;
-    await fs.writeFile(indexPath, JSON.stringify(courses, null, 2));
+    await course.save();
+    
+    // Update index.json
+    await updateIndexJson();
     
     // Mark invite as accepted
     invites[inviteIndex].status = 'accepted';
@@ -137,7 +160,6 @@ router.post('/:token/accept', async (req, res) => {
 });
 
 // POST /api/invites/:token/decline
-// Decline invitation
 router.post('/:token/decline', async (req, res) => {
   try {
     const { token } = req.params;
@@ -151,21 +173,17 @@ router.post('/:token/decline', async (req, res) => {
     
     const invite = invites[inviteIndex];
     
-    // Remove collaborator from course
-    const docsDir = path.join(__dirname, '../../client/public/docs');
-    const indexPath = path.join(docsDir, 'index.json');
+    // Remove collaborator from course in MongoDB
+    const course = await Course.findOne({ projectId: invite.courseId });
     
-    const content = await fs.readFile(indexPath, 'utf-8');
-    const courses = JSON.parse(content);
-    const courseIndex = courses.findIndex(c => c.proj === invite.courseId);
-    
-    if (courseIndex >= 0) {
-      const course = courses[courseIndex];
-      course.collaborators = course.collaborators?.filter(
+    if (course) {
+      course.collaborators = course.collaborators.filter(
         c => !(c.email === invite.invitedEmail && c.inviteToken === token)
-      ) || [];
-      courses[courseIndex] = course;
-      await fs.writeFile(indexPath, JSON.stringify(courses, null, 2));
+      );
+      await course.save();
+      
+      // Update index.json
+      await updateIndexJson();
     }
     
     // Mark invite as declined

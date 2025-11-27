@@ -8,33 +8,21 @@ const userAuthRoutes = require('./routes/userAuth');
 
 const app = express();
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://resources.vijayonline.in'
-];
+// const allowedOrigins = [
+//   'http://localhost:5173',
+//   'https://resources.vijayonline.in'
+// ];
 
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: [
+    "https://resources.vijayonline.in",
+    "https://www.resources.vijayonline.in",
+    "http://localhost:5173"
+  ],
+  credentials: true
 }));
-// Middleware
-// app.use(cors({ 
-//   origin: process.env.CLIENT_URL || 'http://localhost:5173',
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'] 
-// }));
+
+
 app.use(express.json());
 
 // Serve uploaded docs as static files
@@ -88,7 +76,7 @@ app.get('/health', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT,"0.0.0.0", () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`📁 Serving docs from: ${docsPath}`);
   console.log(`📁 Serving uploads from: ${uploadsPath}`);
