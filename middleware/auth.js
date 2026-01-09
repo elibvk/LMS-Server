@@ -1,165 +1,144 @@
+// server/middleware/auth.js
+
 const Admin = require('../models/Admin');
 const User = require('../models/User');
-const { verifyAccessToken } = require('../utils/token');
+const jwt = require('jsonwebtoken');
 
-// Middleware to verify if user is an admin (existing functionality)
+// Existing verifyAdmin middleware (keep as is)
 async function verifyAdmin(req, res, next) {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     
     if (!token) {
-      return res.status(401).json({ error: 'No authorization token provided' });
+      return res.status(401).json({ error: 'No token provided' });
     }
 
-    // For backward compatibility, first check if token is an email (old system)
-    let admin = await Admin.findOne({ email: token });
-
-    // If not found, try JWT verification
+    const admin = await Admin.findOne({ email: token });
+    
     if (!admin) {
-      try {
-        const decoded = verifyAccessToken(token);
-        
-        // Check if it's an admin (user with admin/super_admin role)
-        if (decoded.role === 'admin' || decoded.role === 'super_admin') {
-          admin = await Admin.findOne({ email: decoded.email });
-        }
-        
-        // If still not found, check User model for admin role
-        if (!admin) {
-          const user = await User.findById(decoded.id);
-          if (user && (user.role === 'admin' || user.role === 'super_admin')) {
-            // User is an admin, attach to request
-            req.admin = {
-              _id: user._id,
-              email: user.email,
-              name: user.name,
-              role: user.role
-            };
-            return next();
-          }
-        }
-      } catch (jwtError) {
-        // Token verification failed
-        return res.status(403).json({ error: 'Invalid or expired token' });
-      }
+      return res.status(403).json({ error: 'Invalid token' });
     }
 
-    if (!admin) {
-      return res.status(403).json({ error: 'Not authorized as admin' });
-    }
-
-    // Attach admin to request
-    req.admin = admin;
+    req.admin = {
+      id: admin._id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role
+    };
+    
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
-    res.status(500).json({ error: 'Authorization failed' });
+    console.error('Error verifying admin:', error);
+    res.status(500).json({ error: 'Verification failed' });
   }
 }
 
-// Middleware to verify authenticated user (admin or regular user)
+// 🆕 NEW: Verify User (Regular User Authentication)
 async function verifyUser(req, res, next) {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
     
-    if (!token) {
-      return res.status(401).json({ error: 'No authorization token provided' });
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
     }
 
-    // Try JWT verification
-    try {
-      const decoded = verifyAccessToken(token);
-      
-      // Find user (could be in User or Admin collection)
-      let user = await User.findById(decoded.id);
-      
-      if (!user) {
-        // Check Admin collection
-        const admin = await Admin.findOne({ email: decoded.email });
-        if (admin) {
-          user = {
-            _id: admin._id,
-            email: admin.email,
-            name: admin.name,
-            role: admin.role,
-            isVerified: true
-          };
-        }
-      }
+    const token = authHeader.split(' ')[1];
 
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      // Attach user to request
-      req.user = user;
-      req.userId = user._id || user.id;
-      next();
-    } catch (jwtError) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Find user
+    const user = await User.findById(decoded.userId);
+    
+    if (!user) {
+      return res.status(403).json({ error: 'User not found' });
     }
 
+    req.user = {
+      id: user._id,
+      email: user.email,
+      name: user.name
+    };
+    
+    next();
   } catch (error) {
-    console.error('User auth middleware error:', error);
-    res.status(500).json({ error: 'Authorization failed' });
+    console.error('Error verifying user:', error);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(403).json({ error: 'Invalid token' });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(403).json({ error: 'Token expired' });
+    }
+    
+    res.status(500).json({ error: 'Authentication failed' });
   }
 }
 
-// Middleware to verify user and require email verification
-async function verifyVerifiedUser(req, res, next) {
+// 🆕 NEW: Verify Either Admin OR User (for quiz generation)
+async function verifyAuth(req, res, next) {
   try {
-    // First verify user exists
-    await verifyUser(req, res, () => {});
-
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    // Check if user is verified (admins are auto-verified)
-    if (!req.user.isVerified && req.user.role === 'user') {
-      return res.status(403).json({ 
-        error: 'Email verification required',
-        message: 'Please verify your email address to access this feature'
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        error: 'Authentication required',
+        message: 'Please login to generate quizzes'
       });
     }
 
-    next();
+    const token = authHeader.split(' ')[1];
+
+    // Try Admin first (email-based token)
+    const admin = await Admin.findOne({ email: token });
+    
+    if (admin) {
+      req.user = {
+        id: admin._id,
+        email: admin.email,
+        name: admin.name,
+        role: 'admin',
+        isAdmin: true
+      };
+      return next();
+    }
+
+    // Try User (JWT token)
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      
+      if (user) {
+        req.user = {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: 'user',
+          isAdmin: false
+        };
+        return next();
+      }
+    } catch (jwtError) {
+      // JWT verification failed, continue to error below
+    }
+
+    // Neither admin nor user token valid
+    return res.status(403).json({ 
+      error: 'Invalid authentication',
+      message: 'Please login again'
+    });
+
   } catch (error) {
-    console.error('Verified user middleware error:', error);
-    res.status(500).json({ error: 'Authorization failed' });
+    console.error('Error in verifyAuth:', error);
+    res.status(500).json({ 
+      error: 'Authentication failed',
+      message: 'Please try again'
+    });
   }
 }
 
-// Middleware to check if user is admin or super admin
-function requireAdmin(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-
-  next();
-}
-
-// Middleware to check if user is super admin
-function requireSuperAdmin(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  if (req.user.role !== 'super_admin') {
-    return res.status(403).json({ error: 'Super admin access required' });
-  }
-
-  next();
-}
-
-module.exports = {
-  verifyAdmin,
+module.exports = { 
+  verifyAdmin, 
   verifyUser,
-  verifyVerifiedUser,
-  requireAdmin,
-  requireSuperAdmin
+  verifyAuth  // 🆕 Export new middleware
 };

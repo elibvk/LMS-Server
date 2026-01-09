@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>__COURSE_TITLE__</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css" />
+  <style>
+    .note-box {
+      border: 2px solid #2196f3;
+      background: #e3f2fd;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+    
+    /* Sidebar styling based on context */
+    aside.sidebar {
+      transition: transform 0.3s ease !important;
+      position: fixed !important;
+      left: 0 !important;
+      top: 0 !important;
+      bottom: 0 !important;
+      width: 300px !important;
+      background: #fff !important;
+      z-index: 100 !important;
+      overflow-y: auto !important;
+    }
+    
+    /* Hide sidebar in course context */
+    body.course-context aside.sidebar {
+      display: none !important;
+    }
+    
+    /* Hide sidebar toggle in course context */
+    body.course-context .sidebar-toggle,
+    body.course-context .custom-toggle {
+      display: none !important;
+    }
+    
+    /* Standalone mode - sidebar starts hidden */
+    body:not(.course-context) aside.sidebar {
+      transform: translateX(-300px) !important;
+    }
+    
+    body:not(.course-context) aside.sidebar.open {
+      transform: translateX(0) !important;
+    }
+    
+    /* Standalone mode - content positioning */
+    body:not(.course-context) main {
+      margin-left: 20px !important;
+      margin-right: 20px !important;
+      padding-left: 0 !important;
+      transition: margin-left 0.3s ease !important;
+    }
+    
+    body:not(.course-context).sidebar-open main {
+      margin-left: 320px !important;
+    }
+    
+    body:not(.course-context) .content {
+      max-width: none !important;
+      padding: 0 !important;
+    }
+    
+    body:not(.course-context) .markdown-section {
+      max-width: 900px !important;
+      margin: 0 !important;
+      padding: 30px 20px !important;
+    }
+    
+    /* Custom hamburger toggle - only in standalone */
+    .custom-toggle {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 2001 !important;
+      color: #42b983;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 20px;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: opacity 0.2s ease;
+    }
+    
+    .custom-toggle:hover {
+      opacity: 0.6;
+    }
+    
+    .sidebar-toggle {
+      display: none !important;
+    }
+    
+    .sidebar-overlay {
+      display: none !important;
+    }
+
+    /* --------------------------------------------------------
+       Course Context: Remove ALL margins and let React control positioning
+    -------------------------------------------------------- */
+    body.course-context main {
+      margin: 0 !important;
+      padding: 0 !important;
+      max-width: none !important;
+    }
+    
+    body.course-context .content {
+      max-width: none !important;
+      margin-left: -230px !important;
+      padding: 0 !important;
+    }
+    
+    body.course-context .markdown-section {
+      max-width: none !important;
+      margin: 0 auto !important;
+      padding: 30px 60px !important;
+      overflow-wrap: anywhere;
+    }
+
+    /* --------------------------------------------------------
+       Course Context + Sidebar COLLAPSED - same as above
+    -------------------------------------------------------- */
+    body.course-context.course-sidebar-closed main {
+      margin-left: -150px !important;
+      padding: 0 !important;
+    }
+    
+    body.course-context.course-sidebar-closed .content {
+      max-width: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    
+    body.course-context.course-sidebar-closed .markdown-section {
+      max-width: none !important;
+      margin: 0 auto !important;
+      padding: 30px 60px !important;
+    }
+</style>
+  </head>
+  
+  <body>
+    <div id="app">Loading...</div>
+  
+  <script>
+      // Detect if we're in course context by checking parent window URL
+
+(function () {
+
+    // 1️⃣ Detect iframe
+    const insideIframe = window !== window.parent;
+
+    if (!insideIframe) {
+      // Standalone Docsify → show sidebar normally
+      document.body.classList.remove("course-context");
+      console.log("📄 Standalone Docsify mode");
+      return;
+    }
+
+    // 2️⃣ Iframe mode → ALWAYS course context
+    document.body.classList.add("course-context");
+    console.log("🎓 Course iframe mode detected");
+
+})();
+
+
+      // NEW: listen for a postMessage from parent that toggles sidebar-closed state
+      window.addEventListener('message', function (event) {
+        try {
+          const data = event.data;
+          if (!data || data.type !== 'COURSE_SIDEBAR_TOGGLE') return;
+          if (data.closed) {
+            document.body.classList.add('course-sidebar-closed');
+          } else {
+            document.body.classList.remove('course-sidebar-closed');
+          }
+        } catch (err) {
+          // ignore malformed messages
+        }
+      }, false);
+
+      window.$docsify = {
+        name: '__COURSE_TITLE__',
+        repo: '',
+      loadSidebar: true,
+      hideSidebar: false,
+      subMaxLevel: 2,
+      loadNavbar: false,
+      copyCode: {
+        buttonText: '📋 Copy',
+        errorText: '✖ Failed',
+        successText: '✔ Copied!'
+      },
+      plugins: [
+        function (hook) {
+          hook.mounted(function () {
+            const sidebar = document.querySelector('aside.sidebar');
+            const body = document.body;
+            
+            if (!sidebar) return;
+            
+            // Only create toggle in standalone mode
+            if (body.classList.contains('course-context')) return;
+            
+            // Avoid creating duplicate buttons
+            if (document.querySelector('.custom-toggle')) return;
+            
+            // Create hamburger button
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'custom-toggle';
+            toggleBtn.innerHTML = '&#9776;';
+            toggleBtn.setAttribute('aria-label', 'Toggle sidebar');
+            
+            body.insertBefore(toggleBtn, body.firstChild);
+            
+            // Toggle sidebar on click
+            toggleBtn.addEventListener('click', function () {
+              sidebar.classList.toggle('open');
+              body.classList.toggle('sidebar-open');
+            });
+          });
+          
+          hook.doneEach(function () {
+            if (window.MathJax) {
+              MathJax.typesetPromise();
+            }
+          });
+        }
+      ]
+    };
+  </script>
+  
+  <!-- MathJax configuration -->
+  <script>
+    window.MathJax = {
+      tex: { 
+        inlineMath: [['$', '$'], ['\\(', '\\)']] 
+      },
+      svg: { 
+        fontCache: 'global' 
+      }
+    };
+  </script>
+  
+  <!-- Load scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-latex@0"></script>
+</body>
+</html>

@@ -5,6 +5,9 @@ const mongoose = require('mongoose');
 const path = require('path');
 const invitesRoutes = require('./routes/invites');
 const userAuthRoutes = require('./routes/userAuth');
+const programsRouter = require('./routes/programs');
+const modulesRouter = require('./routes/modules');
+const quizRouter = require('./routes/quiz');
 
 const app = express();
 
@@ -17,6 +20,8 @@ app.use(cors({
   origin: [
     "https://resources.vijayonline.in",
     "https://www.resources.vijayonline.in",
+    "https://elib.in",
+    "https://www.elib.in",
     "http://localhost:5173"
   ],
   credentials: true
@@ -27,10 +32,13 @@ app.use(express.json());
 
 // Serve uploaded docs as static files
 const docsPath = path.join(__dirname, '../client/public/docs');
+console.log("STATIC DOCS PATH:", docsPath);
 app.use('/docs', express.static(docsPath));
 
 const uploadsPath = path.join(__dirname, '../uploads');
 app.use('/uploads', express.static(uploadsPath));
+
+const cleanupService = require('./services/quizCleanup');
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI)
@@ -38,6 +46,9 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('✅ MongoDB Connected');
     // Create first super admin if none exists
     initializeSuperAdmin();
+
+    // Start quiz cleanup service
+    cleanupService.start(30000); // Run every 30 seconds
   })
   .catch(err => {
     console.error('❌ MongoDB connection error:', err);
@@ -65,7 +76,13 @@ app.use('/api/courses', require('./routes/courses.js'));
 app.use('/api/admins', require('./routes/admins.js'));
 app.use('/api/invites', invitesRoutes);
 app.use('/api/user-auth', userAuthRoutes);
+app.use('/api/programs', programsRouter);
+app.use('/api/modules', modulesRouter);
+app.use('/api/quiz', quizRouter);
 
+app.get('/',(req,res)=>{
+  res.send("Welcome to E-Lib API Service");
+});
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
@@ -80,4 +97,17 @@ app.listen(PORT,"0.0.0.0", () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`📁 Serving docs from: ${docsPath}`);
   console.log(`📁 Serving uploads from: ${uploadsPath}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🔻 SIGTERM received. Shutting down gracefully...');
+  cleanupService.stop();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🔻 SIGINT received. Shutting down gracefully...');
+  cleanupService.stop();
+  process.exit(0);
 });
