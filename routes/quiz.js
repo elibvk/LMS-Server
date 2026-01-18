@@ -2,117 +2,61 @@
 const express = require('express');
 const router = express.Router();
 const Course = require('../models/Course');
+const QuizQuestion = require('../models/QuizQuestion');
 const QuizSession = require('../models/QuizSession');
 const QuizSubmission = require('../models/QuizSubmission');
 const { generateQuiz } = require('../services/geminiService');
-const { verifyAuth, verifyAdmin } = require('../middleware/auth');
+const { verifyAuth } = require('../middleware/auth');
 const fs = require('fs').promises;
 const path = require('path');
 
-// ===== EXISTING ENDPOINT: Generate Quiz (Single Question) =====
-router.post('/generate', verifyAuth, async (req, res) => {
+const DOCS_ROOT = path.join(__dirname, '../../client/public/docs');
+
+// ==================== ADMIN: PREPARE QUESTION ====================
+// Returns existing questions OR generates new one
+router.post('/question/prepare', verifyAuth, async (req, res) => {
   try {
-    const { projectId } = req.body;
+    const { courseId, mode } = req.body; // mode: "new" | "existing"
 
-    if (!projectId) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Project ID is required' 
-      });
+    if (!courseId) {
+      return res.status(400).json({ error: 'Course ID required' });
     }
 
-    // Fetch course
-    const course = await Course.findOne({ projectId });
-    
-    if (!course) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Course not found' 
-      });
-    }
-
-    // Read README content
-    const readmePath = path.join(
-      __dirname, 
-      '../../client/public/docs', 
-      projectId, 
-      'README.md'
-    );
-
-    let readmeContent;
-    try {
-      readmeContent = await fs.readFile(readmePath, 'utf-8');
-    } catch (err) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Course content not found' 
-      });
-    }
-
-    // Generate quiz using Gemini
-    const result = await generateQuiz(
-      course.title, 
-      readmeContent, 
-      'medium'
-    );
-
-    if (!result.success) {
-      return res.status(result.retryAfter ? 429 : 500).json(result);
-    }
-
-    res.json({
-      success: true,
-      quiz: result.quiz,
-      courseTitle: course.title
-    });
-
-  } catch (error) {
-    console.error('Quiz generation error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to generate quiz' 
-    });
-  }
-});
-
-// ===== NEW: Create Live Quiz Session =====
-router.post('/session/create', verifyAuth, async (req, res) => {
-  try {
-    const { projectId, duration } = req.body;
-
-    // Validate
-    if (!projectId) {
-      return res.status(400).json({ error: 'Project ID required' });
-    }
-
-    if (!duration || duration < 30 || duration > 600) {
-      return res.status(400).json({ 
-        error: 'Duration must be between 30 and 600 seconds' 
-      });
-    }
-
-    // Fetch course
-    const course = await Course.findOne({ projectId });
+    const course = await Course.findOne({ projectId: courseId });
     if (!course) {
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    // Read README
-    const readmePath = path.join(
-      __dirname, 
-      '../../client/public/docs', 
-      projectId, 
-      'README.md'
-    );
+    // MODE: EXISTING - Return available questions
+    if (mode === 'existing') {
+      const questions = await QuizQuestion.getAvailableForCourse(courseId);
+      
+      return res.json({
+        success: true,
+        mode: 'existing',
+        questions: questions.map(q => ({
+          id: q._id,
+          question: q.question,
+          options: q.options,
+          difficulty: q.difficulty,
+          timesUsed: q.timesUsed,
+          lastUsedAt: q.lastUsedAt,
+          createdAt: q.createdAt
+        }))
+      });
+    }
 
+    // MODE: NEW - Generate new question
+    const readmePath = path.join(DOCS_ROOT, courseId, 'README.md');
     let readmeContent;
+    
     try {
       readmeContent = await fs.readFile(readmePath, 'utf-8');
     } catch (err) {
       return res.status(404).json({ error: 'Course content not found' });
     }
 
-    // Generate quiz
+    // Generate quiz using AI
     const result = await generateQuiz(course.title, readmeContent, 'medium');
 
     if (!result.success) {
@@ -125,6 +69,54 @@ router.post('/session/create', verifyAuth, async (req, res) => {
       return res.status(500).json({ error: result.error });
     }
 
+    // Save new question to database
+    const newQuestion = await QuizQuestion.create({
+      courseId,
+      question: result.quiz.question,
+      options: result.quiz.options,
+      correctAnswer: result.quiz.correctAnswer,
+      difficulty: result.quiz.difficulty,
+      explanation: result.quiz.explanation,
+      createdBy: req.user.email,
+      createdByName: req.user.name
+    });
+
+    res.json({
+      success: true,
+      mode: 'new',
+      question: {
+        id: newQuestion._id,
+        question: newQuestion.question,
+        options: newQuestion.options,
+        difficulty: newQuestion.difficulty,
+        explanation: newQuestion.explanation
+      }
+    });
+
+  } catch (error) {
+    console.error('Question prepare error:', error);
+    res.status(500).json({ error: 'Failed to prepare question' });
+  }
+});
+
+// ==================== ADMIN: CREATE SINGLE-QUESTION QUIZ ====================
+router.post('/session/create-single', verifyAuth, async (req, res) => {
+  try {
+    const { questionId, duration } = req.body;
+
+    if (!questionId) {
+      return res.status(400).json({ error: 'Question ID required' });
+    }
+
+    if (!duration || duration < 30 || duration > 600) {
+      return res.status(400).json({ error: 'Duration must be 30-600 seconds' });
+    }
+
+    const question = await QuizQuestion.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
+    }
+
     // Generate unique code
     const quizCode = await QuizSession.generateUniqueCode();
 
@@ -135,20 +127,21 @@ router.post('/session/create', verifyAuth, async (req, res) => {
     // Create session
     const session = await QuizSession.create({
       quizCode,
-      question: result.quiz.question,
-      options: result.quiz.options,
-      correctAnswer: result.quiz.correctAnswer,
-      difficulty: result.quiz.difficulty,
-      explanation: result.quiz.explanation,
+      sessionType: 'single',
+      questionId: question._id,
       duration,
       startedAt,
       expiresAt,
+      status: 'active', // Single questions are immediately active
       createdBy: req.user.email,
       createdByName: req.user.name,
-      status: 'active',
-      courseId: projectId,
-      courseTitle: course.title
+      courseId: question.courseId,
+      courseTitle: (await Course.findOne({ projectId: question.courseId }))?.title
     });
+
+    // Mark question as active
+    await question.activateInSession(session._id);
+    await question.markAsUsed();
 
     res.status(201).json({
       success: true,
@@ -159,141 +152,417 @@ router.post('/session/create', verifyAuth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Session creation error:', error);
-    res.status(500).json({ 
-      error: 'Failed to create quiz session' 
-    });
+    console.error('Single session creation error:', error);
+    res.status(500).json({ error: 'Failed to create quiz session' });
   }
 });
 
-// ===== NEW: Join Quiz Session (Students) =====
-router.post('/session/join', verifyAuth, async (req, res) => {
+// ==================== ADMIN: CREATE CLASS SESSION ====================
+router.post('/session/create-class', verifyAuth, async (req, res) => {
   try {
-    const { quizCode } = req.body;
+    const { courseId, duration } = req.body; // duration in seconds (1-3 hours)
 
-    if (!quizCode || !/^\d{6}$/.test(quizCode)) {
-      return res.status(400).json({ error: 'Invalid quiz code format' });
+    if (!courseId) {
+      return res.status(400).json({ error: 'Course ID required' });
     }
 
-    // Find active session
-    const session = await QuizSession.findOne({ 
-      quizCode, 
-      status: 'active' 
-    });
-
-    if (!session) {
-      return res.status(404).json({ 
-        error: 'Quiz not found or has ended' 
+    if (!duration || duration < 1800 || duration > 10800) {
+      return res.status(400).json({ 
+        error: 'Duration must be 1800-10800 seconds (0.5-3 hours)' 
       });
     }
 
-    // Check expiry
+    const course = await Course.findOne({ projectId: courseId });
+    if (!course) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    // Generate class code
+    const quizCode = await QuizSession.generateClassCode();
+
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + duration * 1000);
+
+    const session = await QuizSession.create({
+      quizCode,
+      sessionType: 'class',
+      duration,
+      startedAt,
+      expiresAt,
+      status: 'waiting', // Starts in waiting state
+      createdBy: req.user.email,
+      createdByName: req.user.name,
+      courseId,
+      courseTitle: course.title,
+      studentsJoined: []
+    });
+
+    res.status(201).json({
+      success: true,
+      sessionCode: session.quizCode,
+      expiresAt: session.expiresAt,
+      duration: session.duration,
+      sessionId: session._id,
+      message: 'Class session created. Students can join now.'
+    });
+
+  } catch (error) {
+    console.error('Class session creation error:', error);
+    res.status(500).json({ error: 'Failed to create class session' });
+  }
+});
+
+// ==================== ADMIN: BROADCAST QUESTION IN CLASS ====================
+router.post('/session/broadcast-question', verifyAuth, async (req, res) => {
+  try {
+    const { sessionCode, questionId } = req.body;
+
+    if (!sessionCode) {
+      return res.status(400).json({ error: 'Session code required' });
+    }
+
+    const session = await QuizSession.findOne({ quizCode: sessionCode });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.sessionType !== 'class') {
+      return res.status(400).json({ error: 'Only class sessions support broadcasting' });
+    }
+
+    if (session.createdBy !== req.user.email) {
+      return res.status(403).json({ error: 'Only session creator can broadcast' });
+    }
+
+    if (session.isExpired()) {
+      return res.status(410).json({ error: 'Session has expired' });
+    }
+
+    const question = await QuizQuestion.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
+    }
+
+    // Deactivate previous question if any
+    if (session.activeQuestionId) {
+      const prevQuestion = await QuizQuestion.findById(session.activeQuestionId);
+      if (prevQuestion) {
+        await prevQuestion.deactivateFromSession();
+      }
+    }
+
+    // Broadcast new question
+    await session.broadcastQuestion(question._id);
+    await question.activateInSession(session._id);
+    await question.markAsUsed();
+
+    res.json({
+      success: true,
+      message: 'Question broadcasted to all students',
+      questionId: question._id,
+      studentsCount: session.studentsJoined.length
+    });
+
+  } catch (error) {
+    console.error('Broadcast error:', error);
+    res.status(500).json({ error: 'Failed to broadcast question' });
+  }
+});
+
+// ==================== ADMIN: END CLASS SESSION ====================
+router.post('/session/end-class', verifyAuth, async (req, res) => {
+  try {
+    const { sessionCode } = req.body;
+
+    const session = await QuizSession.findOne({ quizCode: sessionCode });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.createdBy !== req.user.email) {
+      return res.status(403).json({ error: 'Only session creator can end session' });
+    }
+
+    // Deactivate current question
+    if (session.activeQuestionId) {
+      const question = await QuizQuestion.findById(session.activeQuestionId);
+      if (question) {
+        await question.deactivateFromSession();
+      }
+    }
+
+    session.status = 'expired';
+    await session.save();
+
+    res.json({
+      success: true,
+      message: 'Class session ended',
+      totalQuestions: session.questionsHistory.length,
+      totalStudents: session.studentsJoined.length
+    });
+
+  } catch (error) {
+    console.error('End session error:', error);
+    res.status(500).json({ error: 'Failed to end session' });
+  }
+});
+
+// ==================== STUDENT: JOIN SESSION ====================
+router.post('/session/join', verifyAuth, async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (!code || (!/^\d{6}$/.test(code) && !/^CS_\d{6}$/.test(code))) {
+      return res.status(400).json({ error: 'Invalid code format' });
+    }
+
+    const session = await QuizSession.findOne({ quizCode: code })
+      .populate('questionId')
+      .populate('activeQuestionId');
+
+    if (!session) {
+      return res.status(404).json({ error: 'Quiz not found or has ended' });
+    }
+
     if (session.isExpired()) {
       session.status = 'expired';
       await session.save();
-      return res.status(410).json({ error: 'Quiz has expired' });
+      return res.status(410).json({ error: 'Session has expired' });
     }
 
-    // Check if already submitted
-    const existing = await QuizSubmission.findOne({
-      quizSessionId: session._id,
-      studentEmail: req.user.email
-    });
+    // Add student to session (for class sessions)
+    if (session.sessionType === 'class') {
+      session.addStudent(req.user.email, req.user.name);
+      await session.save();
+    }
 
-    if (existing) {
-      return res.status(409).json({ 
-        error: 'You have already submitted an answer for this quiz',
-        alreadySubmitted: true
+    // SINGLE QUESTION SESSION
+    if (session.sessionType === 'single') {
+      // Check if already submitted
+      const existing = await QuizSubmission.findOne({
+        quizSessionId: session._id,
+        questionId: session.questionId._id,
+        studentEmail: req.user.email
+      });
+
+      if (existing) {
+        return res.status(409).json({ 
+          error: 'You have already submitted an answer',
+          alreadySubmitted: true
+        });
+      }
+
+      return res.json({
+        success: true,
+        sessionType: 'single',
+        status: 'active',
+        sessionId: session._id,
+        question: session.questionId.question,
+        options: session.questionId.options,
+        difficulty: session.questionId.difficulty,
+        remainingTime: session.getRemainingTime(),
+        courseTitle: session.courseTitle
       });
     }
 
-    // Return quiz data
+    // CLASS SESSION
+    if (session.status === 'waiting') {
+      return res.json({
+        success: true,
+        sessionType: 'class',
+        status: 'waiting',
+        sessionId: session._id,
+        courseTitle: session.courseTitle,
+        message: 'Waiting for instructor to start quiz...'
+      });
+    }
+
+    if (session.status === 'active' && session.activeQuestionId) {
+      // Check if already submitted current question
+      const existing = await QuizSubmission.findOne({
+        quizSessionId: session._id,
+        questionId: session.activeQuestionId._id,
+        studentEmail: req.user.email
+      });
+
+      if (existing) {
+        return res.json({
+          success: true,
+          sessionType: 'class',
+          status: 'submitted',
+          message: 'You already submitted this question. Waiting for next question...'
+        });
+      }
+
+      return res.json({
+        success: true,
+        sessionType: 'class',
+        status: 'active',
+        sessionId: session._id,
+        question: session.activeQuestionId.question,
+        options: session.activeQuestionId.options,
+        difficulty: session.activeQuestionId.difficulty,
+        courseTitle: session.courseTitle
+      });
+    }
+
     res.json({
       success: true,
+      sessionType: 'class',
+      status: 'waiting',
       sessionId: session._id,
-      question: session.question,
-      options: session.options,
-      difficulty: session.difficulty,
-      remainingTime: session.getRemainingTime(),
-      startedAt: session.startedAt,
-      expiresAt: session.expiresAt,
       courseTitle: session.courseTitle
     });
 
   } catch (error) {
     console.error('Join error:', error);
-    res.status(500).json({ error: 'Failed to join quiz' });
+    res.status(500).json({ error: 'Failed to join session' });
   }
 });
 
-// ===== NEW: Submit Quiz Answer =====
-router.post('/session/submit', verifyAuth, async (req, res) => {
+// ==================== STUDENT: POLL FOR UPDATES (Class Sessions) ====================
+router.get('/session/poll/:code', verifyAuth, async (req, res) => {
   try {
-    const { quizCode, selectedOption } = req.body;
+    const { code } = req.params;
 
-    if (!quizCode || selectedOption === undefined) {
-      return res.status(400).json({ 
-        error: 'Quiz code and selected option required' 
+    const session = await QuizSession.findOne({ quizCode: code })
+      .populate('activeQuestionId');
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.sessionType !== 'class') {
+      return res.status(400).json({ error: 'Polling only for class sessions' });
+    }
+
+    if (session.isExpired()) {
+      return res.json({
+        status: 'expired',
+        message: 'Session has ended'
       });
     }
 
-    // Validate option
+    if (session.status === 'waiting') {
+      return res.json({
+        status: 'waiting',
+        hasQuestion: false
+      });
+    }
+
+    if (session.status === 'active' && session.activeQuestionId) {
+      // Check if student already submitted
+      const submission = await QuizSubmission.findOne({
+        quizSessionId: session._id,
+        questionId: session.activeQuestionId._id,
+        studentEmail: req.user.email
+      });
+
+      if (submission) {
+        return res.json({
+          status: 'submitted',
+          hasQuestion: false,
+          message: 'Waiting for next question...'
+        });
+      }
+
+      return res.json({
+        status: 'active',
+        hasQuestion: true,
+        question: session.activeQuestionId.question,
+        options: session.activeQuestionId.options,
+        difficulty: session.activeQuestionId.difficulty,
+        questionId: session.activeQuestionId._id
+      });
+    }
+
+    res.json({
+      status: 'waiting',
+      hasQuestion: false
+    });
+
+  } catch (error) {
+    console.error('Poll error:', error);
+    res.status(500).json({ error: 'Polling failed' });
+  }
+});
+
+// ==================== STUDENT: SUBMIT ANSWER ====================
+router.post('/session/submit', verifyAuth, async (req, res) => {
+  try {
+    const { code, selectedOption } = req.body;
+
+    if (!code || selectedOption === undefined) {
+      return res.status(400).json({ error: 'Code and option required' });
+    }
+
     if (![0, 1, 2, 3].includes(selectedOption)) {
       return res.status(400).json({ error: 'Invalid option' });
     }
 
-    // Find session
-    const session = await QuizSession.findOne({ quizCode });
-
+    const session = await QuizSession.findOne({ quizCode: code });
     if (!session) {
-      return res.status(404).json({ error: 'Quiz not found' });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Check expiry
     if (session.isExpired()) {
-      session.status = 'expired';
-      await session.save();
-      return res.status(410).json({ error: 'Quiz has expired' });
+      return res.status(410).json({ error: 'Session has expired' });
+    }
+
+    // Determine which question to check
+    let questionId;
+    if (session.sessionType === 'single') {
+      questionId = session.questionId;
+    } else {
+      questionId = session.activeQuestionId;
+    }
+
+    if (!questionId) {
+      return res.status(400).json({ error: 'No active question' });
+    }
+
+    const question = await QuizQuestion.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
     }
 
     // Check duplicate
     const existing = await QuizSubmission.findOne({
       quizSessionId: session._id,
+      questionId: question._id,
       studentEmail: req.user.email
     });
 
     if (existing) {
-      return res.status(409).json({ 
-        error: 'Answer already submitted' 
-      });
+      return res.status(409).json({ error: 'Already submitted' });
     }
 
     // Calculate time taken
-    const timeTaken = Math.floor(
-      (Date.now() - session.startedAt.getTime()) / 1000
-    );
+    const broadcastTime = session.sessionType === 'single' 
+      ? session.startedAt 
+      : session.questionsHistory.find(q => q.questionId.toString() === question._id.toString())?.broadcastedAt || session.startedAt;
 
-    // Check correctness
-    const isCorrect = selectedOption === session.correctAnswer;
+    const timeTaken = Math.floor((Date.now() - broadcastTime.getTime()) / 1000);
+
+    const isCorrect = selectedOption === question.correctAnswer;
 
     // Save submission
     await QuizSubmission.create({
       quizSessionId: session._id,
+      questionId: question._id,
       studentEmail: req.user.email,
       studentName: req.user.name,
       selectedOption,
       isCorrect,
-      timeTaken,
-      submittedAt: new Date()
+      timeTaken
     });
 
-    // Return result
     res.json({
       success: true,
       isCorrect,
-      correctAnswer: session.correctAnswer,
-      correctOption: session.options[session.correctAnswer],
-      explanation: session.explanation,
+      correctAnswer: question.correctAnswer,
+      correctOption: question.options[question.correctAnswer],
+      explanation: question.explanation,
       timeTaken
     });
 
@@ -301,37 +570,33 @@ router.post('/session/submit', verifyAuth, async (req, res) => {
     console.error('Submit error:', error);
     
     if (error.code === 11000) {
-      return res.status(409).json({ 
-        error: 'Answer already submitted' 
-      });
+      return res.status(409).json({ error: 'Already submitted' });
     }
 
     res.status(500).json({ error: 'Failed to submit answer' });
   }
 });
 
-// ===== NEW: Get Session Results (Admin/Creator) =====
+// ==================== ADMIN: GET SESSION RESULTS ====================
 router.get('/session/:sessionId/results', verifyAuth, async (req, res) => {
   try {
-    const session = await QuizSession.findById(req.params.sessionId);
+    const session = await QuizSession.findById(req.params.sessionId)
+      .populate('questionId')
+      .populate('activeQuestionId')
+      .populate('questionsHistory.questionId');
 
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Check permission
     if (session.createdBy !== req.user.email && !req.user.isAdmin) {
-      return res.status(403).json({ 
-        error: 'You do not have permission to view these results' 
-      });
+      return res.status(403).json({ error: 'No permission' });
     }
 
-    // Get submissions
     const submissions = await QuizSubmission.find({ 
       quizSessionId: session._id 
-    }).sort({ submittedAt: 1 });
+    }).populate('questionId').sort({ submittedAt: 1 });
 
-    // Calculate stats
     const stats = {
       totalSubmissions: submissions.length,
       correctCount: submissions.filter(s => s.isCorrect).length,
@@ -341,20 +606,23 @@ router.get('/session/:sessionId/results', verifyAuth, async (req, res) => {
         : 0
     };
 
+    // ✅ FIX: Include courseId in response
     res.json({
       session: {
-        question: session.question,
-        options: session.options,
-        correctAnswer: session.correctAnswer,
-        difficulty: session.difficulty,
-        duration: session.duration,
+        type: session.sessionType,
+        code: session.quizCode,
+        courseId: session.courseId,  // ✅ ADD THIS
+        courseTitle: session.courseTitle,
         status: session.status,
-        courseTitle: session.courseTitle
+        duration: session.duration,
+        expiresAt: session.expiresAt,
+        studentsJoined: session.studentsJoined?.length || 0
       },
       stats,
       submissions: submissions.map(s => ({
         studentName: s.studentName,
         studentEmail: s.studentEmail,
+        question: s.questionId?.question,
         selectedOption: s.selectedOption,
         isCorrect: s.isCorrect,
         timeTaken: s.timeTaken,

@@ -1,4 +1,4 @@
-// models/QuizSubmission.js
+// server/models/QuizSubmission.js
 const mongoose = require('mongoose');
 
 const quizSubmissionSchema = new mongoose.Schema({
@@ -8,35 +8,52 @@ const quizSubmissionSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  studentId: {
+  questionId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'QuizQuestion',
     required: true,
     index: true
   },
-  selectedOption: {
+  studentEmail: {
+    type: String,
+    required: true,
+    index: true
+  },
+  studentName: {
     type: String,
     required: true
   },
+  selectedOption: {
+    type: Number,
+    required: true,
+    min: 0,
+    max: 3
+  },
   isCorrect: {
     type: Boolean,
+    required: true
+  },
+  timeTaken: {
+    type: Number, // seconds from broadcast to submission
     required: true
   },
   submittedAt: {
     type: Date,
     required: true,
     default: Date.now
-  },
-  timeTaken: {
-    type: Number // seconds from start to submission
   }
 }, {
   timestamps: true
 });
 
-// Prevent duplicate submissions
-quizSubmissionSchema.index({ quizSessionId: 1, studentId: 1 }, { unique: true });
+// Prevent duplicate submissions for same question in same session
+quizSubmissionSchema.index({ 
+  quizSessionId: 1, 
+  questionId: 1, 
+  studentEmail: 1 
+}, { unique: true });
 
-const QuizSubmission = mongoose.model('QuizSubmission', quizSubmissionSchema);
+// Index for analytics
+quizSubmissionSchema.index({ questionId: 1, isCorrect: 1 });
 
-module.exports = QuizSubmission;
+module.exports = mongoose.model('QuizSubmission', quizSubmissionSchema);

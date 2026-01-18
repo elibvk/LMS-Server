@@ -8,35 +8,42 @@ const quizSessionSchema = new mongoose.Schema({
     unique: true,
     index: true
   },
-  question: {
+  
+  // Session Type: 'single' = one question with timer, 'class' = multi-question session
+  sessionType: {
     type: String,
+    enum: ['single', 'class'],
+    default: 'single',
     required: true
   },
-  options: {
-    type: [String],
-    required: true,
-    validate: [arr => arr.length === 4, 'Must have exactly 4 options']
+  
+  // For single question sessions
+  questionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'QuizQuestion',
+    required: function() { return this.sessionType === 'single'; }
   },
-  correctAnswer: {
-    type: Number, // Index 0-3
-    required: true,
-    min: 0,
-    max: 3
+  
+  // For class sessions
+  activeQuestionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'QuizQuestion',
+    default: null
   },
-  difficulty: {
-    type: String,
-    enum: ['easy', 'medium', 'hard'],
-    default: 'medium'
-  },
-  explanation: {
-    type: String,
-    required: true
-  },
+  questionsHistory: [{
+    questionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'QuizQuestion'
+    },
+    broadcastedAt: Date
+  }],
+  
+  // Timing
   duration: {
-    type: Number, // in seconds
+    type: Number,
     required: true,
     min: 10,
-    max: 3600
+    max: 10800 // 3 hours max
   },
   startedAt: {
     type: Date,
@@ -47,33 +54,47 @@ const quizSessionSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  
+  // Status: 'waiting' = students joined but no question yet, 'active' = question shown, 'expired' = ended
+  status: {
+    type: String,
+    enum: ['waiting', 'active', 'expired'],
+    default: 'waiting',
+    index: true
+  },
+  
+  // Creator
   createdBy: {
-    type: String, // email (matches your admin.email or user.email)
+    type: String,
     required: true
   },
   createdByName: {
     type: String
   },
-  status: {
-    type: String,
-    enum: ['active', 'expired'],
-    default: 'active',
-    index: true
-  },
+  
+  // Course info
   courseId: {
-    type: String, // projectId like "0001"
+    type: String,
     required: true
   },
   courseTitle: {
     type: String
-  }
+  },
+  
+  // Students who joined (for class sessions)
+  studentsJoined: [{
+    email: String,
+    name: String,
+    joinedAt: Date
+  }]
 }, {
   timestamps: true
 });
 
-// Indexes for performance
+// Indexes
 quizSessionSchema.index({ quizCode: 1, status: 1 });
 quizSessionSchema.index({ expiresAt: 1 });
+quizSessionSchema.index({ sessionType: 1, status: 1 });
 
 // Check if expired
 quizSessionSchema.methods.isExpired = function() {
@@ -86,14 +107,56 @@ quizSessionSchema.methods.getRemainingTime = function() {
   return Math.max(0, remaining);
 };
 
-// Generate unique 6-digit code
+// Add student to session
+quizSessionSchema.methods.addStudent = function(email, name) {
+  const existing = this.studentsJoined.find(s => s.email === email);
+  if (!existing) {
+    this.studentsJoined.push({
+      email,
+      name,
+      joinedAt: new Date()
+    });
+  }
+};
+
+// Broadcast question in class session
+quizSessionSchema.methods.broadcastQuestion = async function(questionId) {
+  if (this.sessionType !== 'class') {
+    throw new Error('Can only broadcast in class sessions');
+  }
+  
+  this.activeQuestionId = questionId;
+  this.status = 'active';
+  this.questionsHistory.push({
+    questionId,
+    broadcastedAt: new Date()
+  });
+  
+  await this.save();
+};
+
+// Generate unique 6-digit code for single questions
 quizSessionSchema.statics.generateUniqueCode = async function() {
   let code;
   let exists = true;
   
   while (exists) {
     code = Math.floor(100000 + Math.random() * 900000).toString();
-    exists = await this.findOne({ quizCode: code, status: 'active' });
+    exists = await this.findOne({ quizCode: code, status: { $ne: 'expired' } });
+  }
+  
+  return code;
+};
+
+// Generate unique class session code (CS_XXXXXX)
+quizSessionSchema.statics.generateClassCode = async function() {
+  let code;
+  let exists = true;
+  
+  while (exists) {
+    const num = Math.floor(100000 + Math.random() * 900000).toString();
+    code = `CS_${num}`;
+    exists = await this.findOne({ quizCode: code, status: { $ne: 'expired' } });
   }
   
   return code;

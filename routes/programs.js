@@ -77,8 +77,8 @@ router.post('/create', verifyAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    if (!topicIds || !Array.isArray(topicIds) || topicIds.length < 2) {
-      return res.status(400).json({ error: 'At least 2 topics are required' });
+    if (!topicIds || !Array.isArray(topicIds)) {
+      return res.status(400).json({ error: 'Abn error occurred. Try again later.' });
     }
 
     // Verify all topics exist
@@ -137,10 +137,10 @@ router.get('/', async (req, res) => {
     const isAdmin = req.headers.authorization;
     
     let query = {};
-    if (!isAdmin) {
-      // Public users only see published programs
-      query.status = 'published';
-    }
+    // if (!isAdmin) {
+    //   // Public users only see published programs
+    //   query.status = 'published';
+    // }
 
     const programs = await Program.find(query)
       .select('programId slug title description thumbnail duration difficulty category status topicIds createdBy createdAt lastModifiedBy lastModifiedAt collaborators')
@@ -183,13 +183,13 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    // If program is draft, only allow access to admins/collaborators
-    if (program.status === 'draft') {
-      const isAdmin = req.headers.authorization;
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'This course is not published yet' });
-      }
-    }
+    // // If program is draft, only allow access to admins/collaborators
+    // if (program.status === 'draft') {
+    //   const isAdmin = req.headers.authorization;
+    //   if (!isAdmin) {
+    //     return res.status(403).json({ error: 'This course is not published yet' });
+    //   }
+    // }
 
     // ✅ NEW: Load modules if they exist
     let modulesWithTopics = [];
@@ -300,9 +300,9 @@ router.put('/:id', verifyAdmin, async (req, res) => {
     if (status) program.status = status;
     
     if (topicIds && Array.isArray(topicIds)) {
-      if (topicIds.length < 2) {
-        return res.status(400).json({ error: 'At least 2 topics are required' });
-      }
+      // if (topicIds.length < 2) {
+      //   return res.status(400).json({ error: 'At least 2 topics are required' });
+      // }
       
       // Verify all topics exist
       const topics = await Course.find({ projectId: { $in: topicIds } });

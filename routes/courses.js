@@ -478,60 +478,91 @@ router.get("/:id", async (req, res) => {
 });
 
 // GET /api/courses/:id/permissions
-router.get("/:id", async (req, res) => {
+// router.get("/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const course = await Course.findOne({ projectId: id });
+
+//     if (!course) {
+//       return res.status(404).json({ error: "Course not found" });
+//     }
+
+//     // Check if user is admin
+//     const token = req.headers.authorization?.replace('Bearer ', '');
+//     let isAdmin = false;
+    
+//     if (token) {
+//       const Admin = require('../models/Admin');
+//       const admin = await Admin.findOne({ email: token });
+//       isAdmin = !!admin;
+//     }
+
+//     // If course is draft and user is not admin, deny access
+//     if (course.status === 'draft' && !isAdmin) {
+//       return res.status(403).json({ 
+//         error: "This topic is not published yet",
+//         message: "This topic is currently in draft mode and not available to the public."
+//       });
+//     }
+
+//     // Read content from disk
+//     const content = await readCourseContent(id);
+
+//     // Normalize metadata
+//     const courseMeta = {
+//       proj: course.projectId,
+//       slug: course.slug,
+//       title: course.title || "",
+//       description: course.description || "",
+//       keywords: Array.isArray(course.keywords) ? course.keywords : [],
+//       videoLink: course.videoLink || "",
+//       status: course.status, // ⭐ Include status
+//       createdBy: course.createdBy || "",
+//       createdAt: course.createdAt || null,
+//       lastModifiedBy: course.lastModifiedBy || "",
+//       lastModifiedAt: course.lastModifiedAt || null,
+//       collaborators: course.collaborators || [],
+//     };
+
+//     res.json({
+//       success: true,
+//       course: courseMeta,
+//       content: content,
+//     });
+//   } catch (error) {
+//     console.error("Error reading course:", error);
+//     res.status(500).json({ error: "Failed to read course content" });
+//   }
+// });
+
+// GET /api/courses/:id/permissions
+router.get("/:id/permissions", verifyAdmin, async (req, res) => {  // ← Note the /permissions path!
   try {
     const { id } = req.params;
     const course = await Course.findOne({ projectId: id });
-
-    if (!course) {
-      return res.status(404).json({ error: "Course not found" });
-    }
-
-    // Check if user is admin
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    let isAdmin = false;
     
-    if (token) {
-      const Admin = require('../models/Admin');
-      const admin = await Admin.findOne({ email: token });
-      isAdmin = !!admin;
+    if (!course) {
+      return res.status(404).json({ error: 'Course not found' });
     }
-
-    // If course is draft and user is not admin, deny access
-    if (course.status === 'draft' && !isAdmin) {
-      return res.status(403).json({ 
-        error: "This topic is not published yet",
-        message: "This topic is currently in draft mode and not available to the public."
-      });
-    }
-
-    // Read content from disk
-    const content = await readCourseContent(id);
-
-    // Normalize metadata
-    const courseMeta = {
-      proj: course.projectId,
-      slug: course.slug,
-      title: course.title || "",
-      description: course.description || "",
-      keywords: Array.isArray(course.keywords) ? course.keywords : [],
-      videoLink: course.videoLink || "",
-      status: course.status, // ⭐ Include status
-      createdBy: course.createdBy || "",
-      createdAt: course.createdAt || null,
-      lastModifiedBy: course.lastModifiedBy || "",
-      lastModifiedAt: course.lastModifiedAt || null,
-      collaborators: course.collaborators || [],
+    
+    const userEmail = req.admin.email;
+    const userRole = req.admin.role;
+    
+    const permissions = {
+      canEditInfo: course.canEditInfo(userEmail, userRole),
+      canEditContent: course.canEditContent(userEmail, userRole),
+      canManageCollaborators: course.canEditInfo(userEmail, userRole),
+      canPublish: course.canPublish(userEmail, userRole),
+      isAuthor: course.createdBy === userEmail,
+      isSuperAdmin: userRole === 'super_admin',
+      isCollaborator: course.collaborators.some(c => c.email === userEmail && c.status === 'accepted')
     };
-
-    res.json({
-      success: true,
-      course: courseMeta,
-      content: content,
-    });
+    
+    res.json(permissions);
+    
   } catch (error) {
-    console.error("Error reading course:", error);
-    res.status(500).json({ error: "Failed to read course content" });
+    console.error('Error getting course permissions:', error);
+    res.status(500).json({ error: 'Failed to get permissions' });
   }
 });
 
