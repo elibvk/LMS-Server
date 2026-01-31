@@ -167,7 +167,7 @@ module.exports = {
 
 // // Helper: Load index.json
 // async function loadIndexJson() {
-//   const docsDir = path.join(__dirname, '../../client/public/docs');
+//   const docsDir = path.join(process.cwd(), 'client/public/docs');
 //   const indexPath = path.join(docsDir, 'index.json');
   
 //   try {

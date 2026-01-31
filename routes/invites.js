@@ -33,7 +33,7 @@ async function saveInvites(invites) {
 // Helper: Update index.json for backward compatibility
 async function updateIndexJson() {
   try {
-    const docsDir = path.join(__dirname, '../../client/public/docs');
+    const docsDir = path.join(process.cwd(), 'client/public/docs');
     const indexPath = path.join(docsDir, 'index.json');
     
     const courses = await Course.find({}).sort({ projectId: 1 });

@@ -103,92 +103,145 @@
     }
 
     /* --------------------------------------------------------
-       Course Context: Remove ALL margins and let React control positioning
+       Course Context: DESKTOP (> 768px)
     -------------------------------------------------------- */
-    body.course-context main {
-      margin: 0 !important;
-      padding: 0 !important;
-      max-width: none !important;
-    }
-    
-    body.course-context .content {
-      max-width: none !important;
-      margin-left: -230px !important;
-      padding: 0 !important;
-    }
-    
-    body.course-context .markdown-section {
-      max-width: none !important;
-      margin: 0 auto !important;
-      padding: 30px 60px !important;
-      overflow-wrap: anywhere;
+    @media (min-width: 769px) {
+      body.course-context main {
+        margin: 0 !important;
+        padding: 0 !important;
+        max-width: none !important;
+      }
+      
+      body.course-context .content {
+        max-width: none !important;
+        margin-left: -230px !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context .markdown-section {
+        max-width: none !important;
+        margin: 0 auto !important;
+        padding: 30px 60px !important;
+        overflow-wrap: anywhere;
+      }
+
+      /* Course Context + Sidebar COLLAPSED */
+      body.course-context.course-sidebar-closed main {
+        margin-left: -150px !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context.course-sidebar-closed .content {
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context.course-sidebar-closed .markdown-section {
+        max-width: none !important;
+        margin: 0 auto !important;
+        padding: 30px 60px !important;
+      }
     }
 
     /* --------------------------------------------------------
-       Course Context + Sidebar COLLAPSED - same as above
+       Course Context: MOBILE (≤ 768px)
     -------------------------------------------------------- */
-    body.course-context.course-sidebar-closed main {
-      margin-left: -150px !important;
-      padding: 0 !important;
+    @media (max-width: 768px) {
+      body.course-context main {
+        margin: 0 !important;
+        padding: 0 !important;
+        max-width: none !important;
+      }
+      
+      body.course-context .content {
+        max-width: none !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context .markdown-section {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 20px 16px !important;
+        overflow-wrap: anywhere;
+        box-sizing: border-box;
+      }
+
+      /* Course Context + Sidebar COLLAPSED - same as above */
+      body.course-context.course-sidebar-closed main {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context.course-sidebar-closed .content {
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      
+      body.course-context.course-sidebar-closed .markdown-section {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 20px 16px !important;
+      }
+
+      /* Make images responsive on mobile */
+      body.course-context .markdown-section img {
+        max-width: 100% !important;
+        height: auto !important;
+      }
+
+      /* Ensure tables are scrollable on mobile */
+      body.course-context .markdown-section table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
     }
-    
-    body.course-context.course-sidebar-closed .content {
-      max-width: none !important;
-      margin: 0 !important;
-      padding: 0 !important;
-    }
-    
-    body.course-context.course-sidebar-closed .markdown-section {
-      max-width: none !important;
-      margin: 0 auto !important;
-      padding: 30px 60px !important;
-    }
-</style>
-  </head>
+  </style>
+</head>
   
-  <body>
-    <div id="app">Loading...</div>
+<body>
+  <div id="app">Loading...</div>
   
   <script>
-      // Detect if we're in course context by checking parent window URL
+    // Detect if we're in course context by checking parent window URL
+    (function () {
+      // Detect iframe
+      const insideIframe = window !== window.parent;
 
-(function () {
+      if (!insideIframe) {
+        // Standalone Docsify → show sidebar normally
+        document.body.classList.remove("course-context");
+        console.log("📄 Standalone Docsify mode");
+        return;
+      }
 
-    // 1️⃣ Detect iframe
-    const insideIframe = window !== window.parent;
+      // Iframe mode → ALWAYS course context
+      document.body.classList.add("course-context");
+      console.log("🎓 Course iframe mode detected");
+    })();
 
-    if (!insideIframe) {
-      // Standalone Docsify → show sidebar normally
-      document.body.classList.remove("course-context");
-      console.log("📄 Standalone Docsify mode");
-      return;
-    }
-
-    // 2️⃣ Iframe mode → ALWAYS course context
-    document.body.classList.add("course-context");
-    console.log("🎓 Course iframe mode detected");
-
-})();
-
-
-      // NEW: listen for a postMessage from parent that toggles sidebar-closed state
-      window.addEventListener('message', function (event) {
-        try {
-          const data = event.data;
-          if (!data || data.type !== 'COURSE_SIDEBAR_TOGGLE') return;
-          if (data.closed) {
-            document.body.classList.add('course-sidebar-closed');
-          } else {
-            document.body.classList.remove('course-sidebar-closed');
-          }
-        } catch (err) {
-          // ignore malformed messages
+    // Listen for postMessage from parent that toggles sidebar-closed state
+    window.addEventListener('message', function (event) {
+      try {
+        const data = event.data;
+        if (!data || data.type !== 'COURSE_SIDEBAR_TOGGLE') return;
+        if (data.closed) {
+          document.body.classList.add('course-sidebar-closed');
+        } else {
+          document.body.classList.remove('course-sidebar-closed');
         }
-      }, false);
+      } catch (err) {
+        // ignore malformed messages
+      }
+    }, false);
 
-      window.$docsify = {
-        name: '__COURSE_TITLE__',
-        repo: '',
+    window.$docsify = {
+      name: '__COURSE_TITLE__',
+      repo: '',
       loadSidebar: true,
       hideSidebar: false,
       subMaxLevel: 2,
@@ -196,7 +249,7 @@
       copyCode: {
         buttonText: '📋 Copy',
         errorText: '✖ Failed',
-        successText: '✔ Copied!'
+        successText: '✓ Copied!'
       },
       plugins: [
         function (hook) {

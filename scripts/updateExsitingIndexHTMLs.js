@@ -2,7 +2,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const DOCS_ROOT = path.join(__dirname, '../../client/public/docs');
+const DOCS_ROOT = path.join(process.cwd(), 'client/public/docs');
 const TEMPLATE_PATH = path.join(__dirname, '../utils/indexTemplate.html');
 
 async function updateAllIndexFiles() {

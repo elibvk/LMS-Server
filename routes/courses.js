@@ -15,7 +15,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // Constants
-const DOCS_ROOT = path.join(__dirname, '../../client/public/docs');
+const DOCS_ROOT = path.join(process.cwd(), 'client/public/docs');
 
 // Helper: pad number to 4 digits
 function padId(num) {
@@ -247,7 +247,7 @@ async function savePendingUserInvitations(invitations) {
 async function readCourseContent(projectId) {
   const path = require('path');
   const fs = require('fs').promises;
-  const DOCS_ROOT = path.join(__dirname, '../../client/public/docs');
+  const DOCS_ROOT = path.join(process.cwd(), 'client/public/docs');
   const readmePath = path.join(DOCS_ROOT, projectId, 'README.md');
   try {
     const content = await fs.readFile(readmePath, 'utf8');

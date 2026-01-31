@@ -2,12 +2,12 @@
 const mongoose = require('mongoose');
 
 const quizSessionSchema = new mongoose.Schema({
-  quizCode: {
-    type: String,
-    required: true,
-    unique: true,
-    index: true
-  },
+  // quizCode: {
+  //   type: String,
+  //   required: true,
+  //   unique: true,
+  //   index: true
+  // },
   
   // Session Type: 'single' = one question with timer, 'class' = multi-question session
   sessionType: {
@@ -39,29 +39,29 @@ const quizSessionSchema = new mongoose.Schema({
   }],
   
   // Timing
-  duration: {
-    type: Number,
-    required: true,
-    min: 10,
-    max: 10800 // 3 hours max
-  },
-  startedAt: {
-    type: Date,
-    required: true,
-    default: Date.now
-  },
-  expiresAt: {
-    type: Date,
-    required: true
-  },
+  // duration: {
+  //   type: Number,
+  //   required: true,
+  //   min: 10,
+  //   max: 10800 // 3 hours max
+  // },
+  // startedAt: {
+  //   type: Date,
+  //   required: true,
+  //   default: Date.now
+  // },
+  // expiresAt: {
+  //   type: Date,
+  //   required: true
+  // },
   
-  // Status: 'waiting' = students joined but no question yet, 'active' = question shown, 'expired' = ended
-  status: {
-    type: String,
-    enum: ['waiting', 'active', 'expired'],
-    default: 'waiting',
-    index: true
-  },
+  // // Status: 'waiting' = students joined but no question yet, 'active' = question shown, 'expired' = ended
+  // status: {
+  //   type: String,
+  //   enum: ['waiting', 'active', 'expired'],
+  //   default: 'waiting',
+  //   index: true
+  // },
   
   // Creator
   createdBy: {
@@ -136,17 +136,17 @@ quizSessionSchema.methods.broadcastQuestion = async function(questionId) {
 };
 
 // Generate unique 6-digit code for single questions
-quizSessionSchema.statics.generateUniqueCode = async function() {
-  let code;
-  let exists = true;
+// quizSessionSchema.statics.generateUniqueCode = async function() {
+//   let code;
+//   let exists = true;
   
-  while (exists) {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
-    exists = await this.findOne({ quizCode: code, status: { $ne: 'expired' } });
-  }
+//   while (exists) {
+//     code = Math.floor(100000 + Math.random() * 900000).toString();
+//     exists = await this.findOne({ quizCode: code, status: { $ne: 'expired' } });
+//   }
   
-  return code;
-};
+//   return code;
+// };
 
 // Generate unique class session code (CS_XXXXXX)
 quizSessionSchema.statics.generateClassCode = async function() {
